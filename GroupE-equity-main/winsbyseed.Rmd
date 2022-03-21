@@ -1,0 +1,244 @@
+---
+title: "winsbyseed"
+output: pdf_document
+---
+
+## Loading Data
+```{r}
+library(tidyverse)
+library(dplyr)
+```
+
+```{r wta data}
+library(readr)
+data_URLs <- paste("https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_",
+                   1985:2021,
+                   ".csv", 
+                   sep = "")
+wtaresults <- read_csv(data_URLs) 
+```
+
+```{r atp data}
+data_URLs2 <- paste("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_",
+                    1985:2021,
+                    ".csv", 
+                    sep = "")
+atpresults <- read_csv(data_URLs2)
+```
+
+```{r combining data}
+library(tidyverse)
+# adding column to prepare to combine datasets
+wtaresults <- wtaresults %>%
+  mutate(tour = "WTA") 
+
+atpresults <- atpresults %>%
+  mutate(tour = "ATP")
+
+# moving tour column to front for ease
+wtaresults <- wtaresults[,c(50,1:49)]
+atpresults <- atpresults[,c(50,1:49)]
+
+# combining the datasets
+tennis_results <- rbind(wtaresults, atpresults)
+
+# making date objects from date
+library(lubridate)
+tennis_results <- tennis_results %>%
+  mutate(tourney_date = ymd(tourney_date)) %>%
+  mutate(year = year(tourney_date)) %>%
+  mutate(month = month(tourney_date))
+
+# reorganizing date columns together
+tennis_results <- tennis_results[,c(1:7,51:52,8:50)]
+```
+
+\newpage
+
+## Data Cleaning
+
+```{r cleaning data, include = FALSE}
+# ensuring that `winner_seed` is of numeric type instead of character
+tennis_results <- tennis_results %>% 
+  mutate(winner_seed = as.integer(winner_seed)) %>%
+  mutate(loser_seed = as.integer(loser_seed))
+
+# making `winner_entry` and `loser_entry` abbreviations consistent
+tennis_results <- tennis_results %>% 
+  mutate(loser_entry = case_when(
+    winner_entry == 'Alt' ~ 'ALT',
+    loser_entry == 'A' ~ 'ALT',
+    loser_entry == 'Alt' ~ 'ALT',
+    loser_entry == 'wc' ~ 'WC',
+    loser_entry == 'S' ~ 'SE',
+    TRUE ~ loser_entry
+  ))
+
+# cleaning datasets with duplicated information
+clean_1973_surbiton <- tennis_results %>%
+  filter(tourney_id == '1973-1098',
+         match_num != 32,
+         match_num != 33)
+
+clean_1981_johannesburg <- tennis_results %>% 
+  filter(tourney_id == '1981-1099') %>%
+  slice_tail(n = 11)
+
+clean_1990_taranto <- tennis_results %>% 
+  filter(tourney_id == '1990-W-WT-ITA-01A-1990',
+         !(match_num == 29 & round == 'R32'),
+         !(match_num == 30 & round == 'R32'),
+         !(match_num == 31 & round == 'R32'),
+         match_num <= 31)
+
+clean_1991_stpetersburg <- tennis_results %>% 
+  filter(tourney_id == '1991-W-WT-URS-01A-1991',
+         !(match_num == 29 & round == 'R32'),
+         !(match_num == 30 & round == 'R32'),
+         !(match_num == 31 & round == 'R32'),
+         match_num <= 31)
+
+clean_1991_oakland <- tennis_results %>% 
+  filter(tourney_id == '1991-W-WT-USA-19A-1991') %>%
+  slice_head(n = 27)
+
+clean_1992_oklahoma <- tennis_results %>% 
+  filter(tourney_id == '1992-W-WT-USA-02A-1992',
+         !(match_num == 28 & round == 'R32'),
+         !(match_num == 29 & round == 'R32'),
+         !(match_num == 30 & round == 'R32'),
+         !(match_num == 31 & round == 'R32'),
+         match_num <= 31)
+
+# vector of RR tourneys or tourneys with duplicated information
+duplicated_tourneys <- c('1973-1098', '1970-9205', '1981-1099',
+                         '1990-W-WT-ITA-01A-1990', '1991-W-WT-URS-01A-1991', 
+                         '1991-W-WT-USA-19A-1991', '1992-W-WT-USA-02A-1992')
+
+tennis_results <- tennis_results %>% 
+  filter(!(str_detect(tourney_id, "-615") | str_detect(tourney_id, "-8888")), 
+         !(tourney_id %in% duplicated_tourneys)) %>%
+  rbind(clean_1973_surbiton, clean_1981_johannesburg, 
+        clean_1990_taranto, clean_1991_stpetersburg, 
+        clean_1991_oakland, clean_1992_oklahoma)
+
+# replacing mistaken entries
+tennis_results[26765,13] = NA
+tennis_results[26765,12] = 6
+tennis_results[43756,12] = 9
+# from looking at the original draw
+# https://wtafiles.blob.core.windows.net/pdf/draws/archive/1983/702.pdf
+# it can be deduced that they meant seed 9 instead of seed 96
+
+# removing junior, challenger, exho results
+# they are not the main pro tour
+tennis_results <- tennis_results %>%
+  filter(tourney_level != "J" & tourney_level != "CC" & tourney_level != "E")
+
+# standardizing heights to cm
+tennis_results <- tennis_results %>%
+  mutate(winner_ht = ifelse(winner_ht < 100, winner_ht * 100, winner_ht),
+         loser_ht = ifelse(loser_ht < 100, loser_ht * 100, loser_ht))
+
+# adding a column of overall tournament winners for each match
+winners <- tennis_results %>%
+  filter(round == 'F') %>%
+  mutate(tourney_winner = winner_name) %>%
+  select(tour:month, tourney_winner)
+tennis_results <- tennis_results %>%
+  left_join(winners)
+```
+
+
+
+\newpage
+
+```{r}
+rank_point_results <- tennis_results %>%
+  mutate(inv_rank_pts = 13615-winner_rank_points) %>%
+  filter(round == "F",
+         tour == "WTA",
+         tourney_level == "G")
+
+rank_point_results %>%
+  ggplot() +
+  geom_point(aes(x = tourney_date, y = inv_rank_pts))
+```
+
+```{r}
+rank_results <- tennis_results %>%
+  filter(round == "F",
+         tour == "WTA",
+         tourney_level == "G")
+
+rank_results <- rank_results %>%
+  mutate(reveal = case_when(
+    year < 1990 ~ 0,
+    year < 1995 ~ 1,
+    year < 2000 ~ 2,
+    year < 2005 ~ 3,
+    year < 2010 ~ 4,
+    year < 2015 ~ 5,
+    year < 2020 ~ 6,
+    year < 2025 ~ 7
+  ))
+
+rank_results
+
+rank_results %>%
+  ggplot() +
+  geom_point(aes(x = tourney_date, y = winner_rank))
+```
+
+```{r}
+#seeded tournament victories
+seed_results <- tennis_results %>%
+  group_by(year) %>%
+  mutate (num_tourneys = n_distinct(tourney_name)) %>%
+  ungroup %>%
+  filter(round == "F",
+         winner_seed == 1) %>% #should later generalize to all results by imputing n/a seed
+  group_by(tour, year, winner_seed) %>%
+  summarize(percent_win = n()/num_tourneys)
+
+seed_results %>%
+  ggplot() +
+  geom_point(aes(x = year, y = percent_win, color = tour))
+```
+```{r}
+#tournament win-rate by rank
+dummy_column <- tennis_results %>%
+  filter(round == "F") %>%
+  mutate(tourney_winner = winner_name) %>%
+  select(tourney_id, tourney_winner)
+
+top3_results_atp <- tennis_results %>%
+  left_join(dummy_column, by = c("tourney_id")) %>%
+  group_by(tourney_id) %>%
+  mutate(tourney_winner = ifelse(!is.na(tourney_winner)))
+  
+
+head(top3_results_atp)
+```
+
+```{r}
+#unseeded tournament victories
+unseeded_results <- tennis_results %>%
+  filter(is.na(winner_seed), 
+         round == "F") %>%
+  group_by(tour, year, tourney_level) %>%
+  summarize(count = n())
+
+#by tournament type
+unseeded_results %>% 
+  filter(tourney_level == "G") %>%
+  ggplot() +
+  geom_line(aes(x = year, y = count, color = tour))
+
+#overall
+unseeded_results %>%
+  group_by(tour, year) %>%
+  summarize(count = sum(count)) %>%
+  ggplot() +
+  geom_line(aes(x = year, y = count, color = tour))
+```
