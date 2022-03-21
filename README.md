@@ -1,17 +1,7 @@
-# GroupE-equity
+# Is the WTA really more ‘inconsistent’ than the ATP?
 
 ## Link to project
-https://alanyiyu.shinyapps.io/shiny/
-
-## Project roles:
-
-Chris - Project Manager & Director of Research
-
-Julie - Task Manager & Director of Computation
-
-Alan - Facilitator & Reporter
-
-Title - Is the WTA really more ‘inconsistent’ than the ATP?
+https://alanyiyu.shinyapps.io/shiny/ TEMPORARILY DOWN
 
 ## Purpose:
 
