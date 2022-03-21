@@ -1,0 +1,494 @@
+---
+title: "Player Style Clustering"
+author: "Group E"
+date: "12/9/2021"
+output: pdf_document
+---
+```{r}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+```{r wta data, echo = FALSE}
+library(readr)
+data_URLs <- paste("https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_",
+                   1968:2021,
+                   ".csv", 
+                   sep = "")
+wtaresults <- read_csv(data_URLs) 
+```
+
+```{r atp data, echo = FALSE}
+data_URLs2 <- paste("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_",
+                    1968:2021,
+                    ".csv", 
+                    sep = "")
+atpresults <- read_csv(data_URLs2)
+```
+
+```{r combining data, echo = FALSE}
+library(tidyverse)
+# adding column to prepare to combine datasets
+wtaresults <- wtaresults %>%
+  mutate(tour = "WTA") 
+
+atpresults <- atpresults %>%
+  mutate(tour = "ATP")
+
+# moving tour column to front for ease
+wtaresults <- wtaresults[,c(50,1:49)]
+atpresults <- atpresults[,c(50,1:49)]
+
+# combining the datasets
+tennis_results <- rbind(wtaresults, atpresults)
+
+# making date objects from date
+library(lubridate)
+tennis_results <- tennis_results %>%
+  mutate(tourney_date = ymd(tourney_date)) %>%
+  mutate(year = year(tourney_date)) %>%
+  mutate(month = month(tourney_date))
+
+# reorganizing date columns together
+tennis_results <- tennis_results[,c(1:7,51:52,8:50)]
+```
+
+```{r cleaning data, include = FALSE}
+# ensuring that `winner_seed` is of numeric type instead of character
+tennis_results <- tennis_results %>% 
+  mutate(winner_seed = as.integer(winner_seed)) %>%
+  mutate(loser_seed = as.integer(loser_seed))
+
+# making `winner_entry` and `loser_entry` abbreviations consistent
+tennis_results <- tennis_results %>% 
+  mutate(loser_entry = case_when(
+    winner_entry == 'Alt' ~ 'ALT',
+    loser_entry == 'A' ~ 'ALT',
+    loser_entry == 'Alt' ~ 'ALT',
+    loser_entry == 'wc' ~ 'WC',
+    loser_entry == 'S' ~ 'SE',
+    TRUE ~ loser_entry
+  ))
+
+# cleaning datasets with duplicated information
+clean_1973_surbiton <- tennis_results %>%
+  filter(tourney_id == '1973-1098',
+         match_num != 32,
+         match_num != 33)
+
+clean_1981_johannesburg <- tennis_results %>% 
+  filter(tourney_id == '1981-1099') %>%
+  slice_tail(n = 11)
+
+clean_1990_taranto <- tennis_results %>% 
+  filter(tourney_id == '1990-W-WT-ITA-01A-1990',
+         !(match_num == 29 & round == 'R32'),
+         !(match_num == 30 & round == 'R32'),
+         !(match_num == 31 & round == 'R32'),
+         match_num <= 31)
+
+clean_1991_stpetersburg <- tennis_results %>% 
+  filter(tourney_id == '1991-W-WT-URS-01A-1991',
+         !(match_num == 29 & round == 'R32'),
+         !(match_num == 30 & round == 'R32'),
+         !(match_num == 31 & round == 'R32'),
+         match_num <= 31)
+
+clean_1991_oakland <- tennis_results %>% 
+  filter(tourney_id == '1991-W-WT-USA-19A-1991') %>%
+  slice_head(n = 27)
+
+clean_1992_oklahoma <- tennis_results %>% 
+  filter(tourney_id == '1992-W-WT-USA-02A-1992',
+         !(match_num == 28 & round == 'R32'),
+         !(match_num == 29 & round == 'R32'),
+         !(match_num == 30 & round == 'R32'),
+         !(match_num == 31 & round == 'R32'),
+         match_num <= 31)
+
+# vector of RR tourneys or tourneys with duplicated information
+duplicated_tourneys <- c('1973-1098', '1970-9205', '1981-1099',
+                         '1990-W-WT-ITA-01A-1990', '1991-W-WT-URS-01A-1991', 
+                         '1991-W-WT-USA-19A-1991', '1992-W-WT-USA-02A-1992')
+
+tennis_results <- tennis_results %>% 
+  filter(!(str_detect(tourney_id, "-615") | str_detect(tourney_id, "-8888")), 
+         !(tourney_id %in% duplicated_tourneys)) %>%
+  rbind(clean_1973_surbiton, clean_1981_johannesburg, 
+        clean_1990_taranto, clean_1991_stpetersburg, 
+        clean_1991_oakland, clean_1992_oklahoma)
+
+# replacing mistaken entries
+tennis_results[26765,13] = NA
+tennis_results[26765,12] = 6
+tennis_results[43756,12] = 9
+# from looking at the original draw
+# https://wtafiles.blob.core.windows.net/pdf/draws/archive/1983/702.pdf
+# it can be deduced that they meant seed 9 instead of seed 96
+
+# removing junior, challenger, exho results
+# they are not the main pro tour
+tennis_results <- tennis_results %>%
+  filter(tourney_level != "J" & tourney_level != "CC" & tourney_level != "E")
+
+# standardizing heights to cm
+tennis_results <- tennis_results %>%
+  mutate(winner_ht = ifelse(winner_ht < 100, winner_ht * 100, winner_ht),
+         loser_ht = ifelse(loser_ht < 100, loser_ht * 100, loser_ht))
+
+# adding a column of overall tournament winners for each match
+winners <- tennis_results %>%
+  filter(round == 'F') %>%
+  mutate(tourney_winner = winner_name) %>%
+  select(tour:month, tourney_winner)
+tennis_results <- tennis_results %>%
+  left_join(winners)
+```
+
+I am following the cluster analysis steps from this **[ATP cluster analysis](https://towardsdatascience.com/atp-tennis-cluster-analysis-91bbcce61595)**. The goal is to compare the results from this WTA cluster analysis to the results in the ATP cluster analysis to explore how playing styles might differ.
+
+```{r}
+library(naniar)
+# from https://cran.r-project.org/web/packages/naniar/vignettes/replace-with-na.html
+tennis_results <- tennis_results %>%
+  replace_with_na(replace = list(w_SvGms = 0, l_SvGms = 0, minutes = 0))
+
+# selecting matches from 2011 onward
+# creating the statistics that they mentioned in the table
+playerstyle_WTA_cluster <- tennis_results %>%
+  filter(year >= 2011, tour == "WTA", !is.na(w_1stIn), !is.na(w_svpt), !is.na(l_1stIn), !is.na(l_svpt), !is.na(w_1stWon), !is.na(w_2ndWon), !is.na(l_1stWon), !is.na(l_2ndWon), !is.na(w_ace), !is.na(l_ace), !is.na(w_df), !is.na(l_df), !is.na(w_SvGms), !is.na(l_SvGms), !is.na(w_bpSaved), !is.na(w_bpFaced), !is.na(l_bpSaved), !is.na(l_bpFaced), !is.na(minutes)) %>%
+  mutate(w_1stsvpct = w_1stIn/w_svpt, 
+         l_1stsvpct = l_1stIn/l_svpt,
+         w_svpctWon = (w_1stWon+w_2ndWon)/w_svpt,
+         l_svpctWon = (l_1stWon+l_2ndWon)/l_svpt,
+         w_1stsvWon = w_1stWon/w_1stIn,
+         l_1stsvWon = l_1stWon/l_1stIn,
+         w_2ndsvWon = w_2ndWon/(w_svpt-w_1stIn),
+         l_2ndsvWon = l_2ndWon/(l_svpt-l_1stIn),
+         w_acepct = w_ace/w_svpt,
+         l_acepct = l_ace/l_svpt,
+         w_dfpct = w_df/w_svpt,
+         l_dfpct = l_df/l_svpt,
+         w_ptspersvgame = w_svpt/w_SvGms,
+         l_ptspersvgame = l_svpt/l_SvGms,
+         w_bpSavepct = w_bpSaved/w_bpFaced,
+         l_bpSavepct = l_bpSaved/l_bpFaced,
+         w_bppersvgame = w_bpFaced/w_SvGms,
+         l_bppersvgame = l_bpFaced/l_SvGms,
+         w_pctptWon = (w_1stWon+w_2ndWon+(l_svpt-l_1stWon-l_2ndWon))/(w_svpt+l_svpt),
+         l_pctptWon = (l_1stWon+l_2ndWon+(w_svpt-w_1stWon-w_2ndWon))/(w_svpt+l_svpt),
+         w_1stretWon = (l_1stIn-l_1stWon)/l_1stIn,
+         l_1stretWon = (w_1stIn-w_1stWon)/w_1stIn,
+         w_2ndretWon = (l_svpt-l_1stIn-l_2ndWon)/(l_svpt-l_1stIn),
+         l_2ndretWon = (w_svpt-w_1stIn-w_2ndWon)/(w_svpt-w_1stIn),
+         w_retpctWon = 1-(l_1stWon+l_2ndWon)/l_svpt,
+         l_retpctWon = 1-(w_1stWon+w_2ndWon)/w_svpt,
+         w_ptsperretgame = l_svpt/l_SvGms,
+         l_ptsperretgame = w_svpt/w_SvGms,
+         w_bpConvpct = 1-l_bpSaved/l_bpFaced,
+         l_bpConvpct = 1-w_bpSaved/w_bpFaced,
+         w_bpperretgame = l_bpFaced/l_SvGms,
+         l_bpperretgame = w_bpFaced/w_SvGms,
+         w_retace = l_ace/l_svpt,
+         l_retace = w_ace/w_svpt,
+         w_retdf = l_df/l_svpt,
+         l_retdf = w_df/w_svpt,
+         ptspermin = (w_svpt+l_svpt)/minutes) %>%
+  select(1:30, 49:89)
+```
+
+```{r}
+# creating two rows for winner/loser
+cluster_w <- playerstyle_WTA_cluster %>%
+  select(tour, tourney_id, tourney_name, surface, tourney_date, year, month, winner_id, winner_name, winner_ht, winner_age, score, best_of, minutes, winner_rank, winner_rank_points, w_1stsvpct, w_svpctWon, w_1stsvWon, w_2ndsvWon, w_acepct, w_dfpct, w_ptspersvgame, w_bpSavepct, w_bppersvgame, w_pctptWon, w_1stretWon, w_2ndretWon, w_retpctWon, w_ptsperretgame, w_bpConvpct, w_bpperretgame, w_retace, w_retdf, ptspermin) %>%
+  mutate(result = 1)
+
+colnames(cluster_w) <- c("tour", "tourney_id", "tourney_name", "surface", "tourney_date", "year", "month", "id", "name", "height", "age", "score", "best_of", "minutes", "rank", "rank_points", "1stsvpct", "svpctWon", "1stsvWon", "2ndsvWon", "acepct", "dfpct", "ptspersvgame", "bpSavepct", "bppersvgame", "pctptWon", "1stretWon", "2ndretWon", "retpctWon", "ptsperretgame", "bpConvpct", "bpperretgame", "retace", "retdf", "ptspermin", "result")
+
+cluster_l <- playerstyle_WTA_cluster %>%
+  select(tour, tourney_id, tourney_name, surface, tourney_date, year, month, loser_id, loser_name, loser_ht, loser_age, score, best_of, minutes, loser_rank, loser_rank_points, l_1stsvpct, l_svpctWon, l_1stsvWon, l_2ndsvWon, l_acepct, l_dfpct, l_ptspersvgame, l_bpSavepct, l_bppersvgame, l_pctptWon, l_1stretWon, l_2ndretWon, l_retpctWon, l_ptsperretgame, l_bpConvpct, l_bpperretgame, l_retace, l_retdf, ptspermin) %>%
+  mutate(result = 0)
+
+colnames(cluster_l) <- c("tour", "tourney_id", "tourney_name", "surface", "tourney_date", "year", "month", "id", "name", "height", "age", "score", "best_of", "minutes", "rank", "rank_points", "1stsvpct", "svpctWon", "1stsvWon", "2ndsvWon", "acepct", "dfpct", "ptspersvgame", "bpSavepct", "bppersvgame", "pctptWon", "1stretWon", "2ndretWon", "retpctWon", "ptsperretgame", "bpConvpct", "bpperretgame", "retace", "retdf", "ptspermin", "result")
+
+final_cluster_data <- rbind(cluster_w,cluster_l)
+```
+
+```{r}
+# calculating stats by player
+WTA_player_stats <- final_cluster_data %>%
+  group_by(id, name) %>%
+  summarize(height = mean(height), 
+            age = max(age), 
+            win_perc = mean(result), 
+            perc_points_won = mean(pctptWon, na.rm = TRUE), 
+            "1st_serv_perc" = mean(`1stsvpct`, na.rm = TRUE), 
+            "1st_win" = mean(`1stsvWon`, na.rm = TRUE), 
+            ace_perc = mean(acepct, na.rm = TRUE), 
+            df_perc = mean(dfpct, na.rm = TRUE), 
+            "2nd_win" = mean(`2ndsvWon`, na.rm = TRUE), 
+            svc_perc_win = mean(svpctWon, na.rm = TRUE), 
+            points_per_svc_game = mean(ptspersvgame, na.rm = TRUE), 
+            break_point_save_perc = mean(bpSavepct, na.rm = TRUE), 
+            bp_per_game = mean(bppersvgame, na.rm = TRUE), 
+            return_1st_win = mean(`1stretWon`, na.rm = TRUE), 
+            return_ace_perc = mean(retace, na.rm = TRUE), 
+            return_df_perc = mean(retdf, na.rm = TRUE), 
+            return_2nd_win = mean(`2ndretWon`, na.rm = TRUE), 
+            return_perc_win = mean(retpctWon, na.rm = TRUE), 
+            points_per_return_game = mean(ptsperretgame, na.rm = TRUE), 
+            bp_convert_perc = mean(bpConvpct, na.rm = TRUE), 
+            return_bp_per_game = mean(bpperretgame, na.rm = TRUE), 
+            points_per_minute = mean(ptspermin, na.rm = TRUE))
+
+surface_stats <- final_cluster_data %>%
+  group_by(id, name, surface) %>%
+  summarize(count = n()) %>%
+  mutate(freq = count / sum(count)) %>%
+  pivot_wider(id_cols = c(id, name), names_from = surface, values_from = freq) %>%
+  summarize(clay_perc = Clay, grass_perc = Grass, hard_perc = Hard) %>%
+  select(-2)
+
+final_WTA <- cbind(surface_stats, WTA_player_stats) %>%
+  select(-1) %>%
+  rename(id = id...5) %>%
+  select(4:7, 1:3, 8:27)
+```
+
+```{r}
+library(broom)
+# cluster analysis
+final_WTA_km <- final_WTA %>%
+  drop_na() %>%
+  select(height:points_per_minute) %>%
+  mutate(across(height:points_per_minute, scale))
+
+set.seed(13)
+final_WTA_kclusts <- 
+  tibble(k = 1:9) %>%
+  mutate(final_WTA_kclust = map(k, ~kmeans(final_WTA_km, .x)),
+    glanced = map(final_WTA_kclust, glance),
+    tidied = map(final_WTA_kclust, tidy),
+    augmented = map(final_WTA_kclust, augment, final_WTA_km)
+  )
+```
+
+
+```{r}
+clusters <- 
+  final_WTA_kclusts %>%
+  unnest(cols = c(tidied))
+
+assignments <- 
+  final_WTA_kclusts %>% 
+  unnest(cols = c(augmented))
+
+clusterings <- 
+  final_WTA_kclusts %>%
+  unnest(cols = c(glanced))
+```
+
+```{r}
+clusterings %>%
+  ggplot(aes(x = k, y = tot.withinss)) + 
+  geom_line() + 
+  geom_point() + ylab("") +
+  ggtitle("Total Within Sum of Squares")
+```
+
+```{r}
+set.seed(47)
+WTA_clustered <- final_WTA_km %>%
+  kmeans(centers = 4)
+
+WTA_clusters <- cbind(WTA_clustered$cluster, final_WTA %>% drop_na())
+```
+
+```{r}
+WTA_clusters %>%
+  rename(cluster = `WTA_clustered$cluster`) %>%
+  group_by(cluster) %>%
+  select(cluster, height:points_per_minute) %>%
+  summarise_each(funs(mean(., na.rm = TRUE))) %>%
+  mutate(cluster = as.factor(cluster)) %>%
+  mutate(cluster = recode(cluster, "1" = "between tours", "2" = "top players", "3" = "strong servers (ATP)/strong returners (WTA)", "4" = "tier 2"))
+# from https://stackoverflow.com/questions/21807987/calculate-the-mean-for-each-column-of-a-matrix-in-r
+```
+
+## ATP Replication
+
+```{r}
+library(naniar)
+# from https://cran.r-project.org/web/packages/naniar/vignettes/replace-with-na.html
+tennis_results <- tennis_results %>%
+  replace_with_na(replace = list(w_SvGms = 0, l_SvGms = 0, minutes = 0))
+
+# selecting matches from 2011 onward
+# creating the statistics that they mentioned in the table
+playerstyle_ATP_cluster <- tennis_results %>%
+  filter(year >= 2011, tour == "ATP", !is.na(w_1stIn), !is.na(w_svpt), !is.na(l_1stIn), !is.na(l_svpt), !is.na(w_1stWon), !is.na(w_2ndWon), !is.na(l_1stWon), !is.na(l_2ndWon), !is.na(w_ace), !is.na(l_ace), !is.na(w_df), !is.na(l_df), !is.na(w_SvGms), !is.na(l_SvGms), !is.na(w_bpSaved), !is.na(w_bpFaced), !is.na(l_bpSaved), !is.na(l_bpFaced), !is.na(minutes)) %>%
+  mutate(w_1stsvpct = w_1stIn/w_svpt, 
+         l_1stsvpct = l_1stIn/l_svpt,
+         w_svpctWon = (w_1stWon+w_2ndWon)/w_svpt,
+         l_svpctWon = (l_1stWon+l_2ndWon)/l_svpt,
+         w_1stsvWon = w_1stWon/w_1stIn,
+         l_1stsvWon = l_1stWon/l_1stIn,
+         w_2ndsvWon = w_2ndWon/(w_svpt-w_1stIn),
+         l_2ndsvWon = l_2ndWon/(l_svpt-l_1stIn),
+         w_acepct = w_ace/w_svpt,
+         l_acepct = l_ace/l_svpt,
+         w_dfpct = w_df/w_svpt,
+         l_dfpct = l_df/l_svpt,
+         w_ptspersvgame = w_svpt/w_SvGms,
+         l_ptspersvgame = l_svpt/l_SvGms,
+         w_bpSavepct = w_bpSaved/w_bpFaced,
+         l_bpSavepct = l_bpSaved/l_bpFaced,
+         w_bppersvgame = w_bpFaced/w_SvGms,
+         l_bppersvgame = l_bpFaced/l_SvGms,
+         w_pctptWon = (w_1stWon+w_2ndWon+(l_svpt-l_1stWon-l_2ndWon))/(w_svpt+l_svpt),
+         l_pctptWon = (l_1stWon+l_2ndWon+(w_svpt-w_1stWon-w_2ndWon))/(w_svpt+l_svpt),
+         w_1stretWon = (l_1stIn-l_1stWon)/l_1stIn,
+         l_1stretWon = (w_1stIn-w_1stWon)/w_1stIn,
+         w_2ndretWon = (l_svpt-l_1stIn-l_2ndWon)/(l_svpt-l_1stIn),
+         l_2ndretWon = (w_svpt-w_1stIn-w_2ndWon)/(w_svpt-w_1stIn),
+         w_retpctWon = 1-(l_1stWon+l_2ndWon)/l_svpt,
+         l_retpctWon = 1-(w_1stWon+w_2ndWon)/w_svpt,
+         w_ptsperretgame = l_svpt/l_SvGms,
+         l_ptsperretgame = w_svpt/w_SvGms,
+         w_bpConvpct = 1-l_bpSaved/l_bpFaced,
+         l_bpConvpct = 1-w_bpSaved/w_bpFaced,
+         w_bpperretgame = l_bpFaced/l_SvGms,
+         l_bpperretgame = w_bpFaced/w_SvGms,
+         w_retace = l_ace/l_svpt,
+         l_retace = w_ace/w_svpt,
+         w_retdf = l_df/l_svpt,
+         l_retdf = w_df/w_svpt,
+         ptspermin = (w_svpt+l_svpt)/minutes) %>%
+  select(1:30, 49:89)
+```
+
+```{r}
+# creating two rows for winner/loser
+cluster_w_m <- playerstyle_ATP_cluster %>%
+  select(tour, tourney_id, tourney_name, surface, tourney_date, year, month, winner_id, winner_name, winner_ht, winner_age, score, best_of, minutes, winner_rank, winner_rank_points, w_1stsvpct, w_svpctWon, w_1stsvWon, w_2ndsvWon, w_acepct, w_dfpct, w_ptspersvgame, w_bpSavepct, w_bppersvgame, w_pctptWon, w_1stretWon, w_2ndretWon, w_retpctWon, w_ptsperretgame, w_bpConvpct, w_bpperretgame, w_retace, w_retdf, ptspermin) %>%
+  mutate(result = 1)
+
+colnames(cluster_w_m) <- c("tour", "tourney_id", "tourney_name", "surface", "tourney_date", "year", "month", "id", "name", "height", "age", "score", "best_of", "minutes", "rank", "rank_points", "1stsvpct", "svpctWon", "1stsvWon", "2ndsvWon", "acepct", "dfpct", "ptspersvgame", "bpSavepct", "bppersvgame", "pctptWon", "1stretWon", "2ndretWon", "retpctWon", "ptsperretgame", "bpConvpct", "bpperretgame", "retace", "retdf", "ptspermin", "result")
+
+cluster_l_m <- playerstyle_ATP_cluster %>%
+  select(tour, tourney_id, tourney_name, surface, tourney_date, year, month, loser_id, loser_name, loser_ht, loser_age, score, best_of, minutes, loser_rank, loser_rank_points, l_1stsvpct, l_svpctWon, l_1stsvWon, l_2ndsvWon, l_acepct, l_dfpct, l_ptspersvgame, l_bpSavepct, l_bppersvgame, l_pctptWon, l_1stretWon, l_2ndretWon, l_retpctWon, l_ptsperretgame, l_bpConvpct, l_bpperretgame, l_retace, l_retdf, ptspermin) %>%
+  mutate(result = 0)
+
+colnames(cluster_l_m) <- c("tour", "tourney_id", "tourney_name", "surface", "tourney_date", "year", "month", "id", "name", "height", "age", "score", "best_of", "minutes", "rank", "rank_points", "1stsvpct", "svpctWon", "1stsvWon", "2ndsvWon", "acepct", "dfpct", "ptspersvgame", "bpSavepct", "bppersvgame", "pctptWon", "1stretWon", "2ndretWon", "retpctWon", "ptsperretgame", "bpConvpct", "bpperretgame", "retace", "retdf", "ptspermin", "result")
+
+final_cluster_data_m <- rbind(cluster_w_m,cluster_l_m)
+```
+
+```{r}
+# calculating stats by player
+ATP_player_stats <- final_cluster_data_m %>%
+  group_by(id, name) %>%
+  summarize(height = mean(height), age = max(age), win_perc = mean(result), perc_points_won = mean(pctptWon, na.rm = TRUE), "1st_serv_perc" = mean(`1stsvpct`, na.rm = TRUE), "1st_win" = mean(`1stsvWon`, na.rm = TRUE), ace_perc = mean(acepct, na.rm = TRUE), df_perc = mean(dfpct, na.rm = TRUE), "2nd_win" = mean(`2ndsvWon`, na.rm = TRUE), svc_perc_win = mean(svpctWon, na.rm = TRUE), points_per_svc_game = mean(ptspersvgame, na.rm = TRUE), break_point_save_perc = mean(bpSavepct, na.rm = TRUE), bp_per_game = mean(bppersvgame, na.rm = TRUE), return_1st_win = mean(`1stretWon`, na.rm = TRUE), return_ace_perc = mean(retace, na.rm = TRUE), return_df_perc = mean(retdf, na.rm = TRUE), return_2nd_win = mean(`2ndretWon`, na.rm = TRUE), return_perc_win = mean(retpctWon, na.rm = TRUE), points_per_return_game = mean(ptsperretgame, na.rm = TRUE), bp_convert_perc = mean(bpConvpct, na.rm = TRUE), return_bp_per_game = mean(bpperretgame, na.rm = TRUE), points_per_minute = mean(ptspermin, na.rm = TRUE))
+
+surface_stats_m <- final_cluster_data_m %>%
+  group_by(id, name, surface) %>%
+  summarize(count = n()) %>%
+  mutate(freq = count / sum(count)) %>%
+  pivot_wider(id_cols = c(id, name), names_from = surface, values_from = freq) %>%
+  summarize(clay_perc = Clay, grass_perc = Grass, hard_perc = Hard) %>%
+  select(-2)
+
+final_ATP <- cbind(surface_stats_m, ATP_player_stats) %>%
+  select(-1) %>%
+  rename(id = id...5) %>%
+  select(4:7, 1:3, 8:27)
+```
+
+```{r}
+# cluster analysis
+final_ATP_km <- final_ATP %>%
+  drop_na() %>%
+  select(height:points_per_minute) %>%
+  mutate(across(height:points_per_minute, scale))
+
+set.seed(7)
+final_ATP_kclusts <- 
+  tibble(k = 1:9) %>%
+  mutate(final_ATP_kclust = map(k, ~kmeans(final_ATP_km, .x)),
+    glanced = map(final_ATP_kclust, glance),
+    tidied = map(final_ATP_kclust, tidy),
+    augmented = map(final_ATP_kclust, augment, final_ATP_km)
+  )
+```
+
+
+```{r}
+clusters_m <- 
+  final_ATP_kclusts %>%
+  unnest(cols = c(tidied))
+
+assignments_m <- 
+  final_ATP_kclusts %>% 
+  unnest(cols = c(augmented))
+
+clusterings_m <- 
+  final_ATP_kclusts %>%
+  unnest(cols = c(glanced))
+```
+
+```{r}
+clusterings_m %>%
+  ggplot(aes(x = k, y = tot.withinss)) + 
+  geom_line() + 
+  geom_point() + ylab("") +
+  ggtitle("Total Within Sum of Squares")
+```
+
+```{r}
+set.seed(47)
+ATP_clustered <- final_ATP_km %>%
+  kmeans(centers = 4) # use 4 to compare to WTA
+
+ATP_clusters <- cbind(ATP_clustered$cluster, final_ATP %>% drop_na())
+```
+
+```{r}
+ATP_clusters %>%
+  rename(cluster = `ATP_clustered$cluster`) %>%
+  group_by(cluster) %>%
+  select(cluster, height:points_per_minute) %>%
+  summarise_each(funs(mean(., na.rm = TRUE))) %>%
+  mutate(cluster = as.factor(cluster)) %>%
+   mutate(cluster = recode(cluster, "1" = "tier 2", "2" = "top players", "3" = "between tours", "4" = "strong servers (ATP)/strong returners (WTA)"))
+# from https://stackoverflow.com/questions/21807987/calculate-the-mean-for-each-column-of-a-matrix-in-r
+```
+
+
+```{r}
+# combining the two datasets
+ATP_cluster_results <- ATP_clusters %>%
+  rename(cluster = `ATP_clustered$cluster`) %>%
+  group_by(cluster) %>%
+  select(cluster, height:points_per_minute) %>%
+  summarise_each(funs(mean(., na.rm = TRUE))) %>%
+  mutate(tour = "ATP",
+         cluster = as.factor(cluster)) %>%
+  mutate(cluster = recode(cluster, "1" = "tier 2", "2" = "top players", 
+                           "3" = "between tours", 
+                           "4" = "strong servers (ATP)/\nstrong returners (WTA)")) %>%
+  select(27, 1:26)
+
+WTA_cluster_results <- WTA_clusters %>%
+  rename(cluster = `WTA_clustered$cluster`) %>%
+  group_by(cluster) %>%
+  select(cluster, height:points_per_minute) %>%
+  summarise_each(funs(mean(., na.rm = TRUE))) %>%
+  mutate(tour = "WTA",
+         cluster = as.factor(cluster)) %>%
+  mutate(cluster = recode(cluster, "1" = "between tours", "2" = "top players", 
+                          "3" = "strong servers (ATP)/\nstrong returners (WTA)", 
+                          "4" = "tier 2")) %>%
+  select(27, 1:26)
+
+all_cluster_results <- rbind(ATP_cluster_results, WTA_cluster_results)
+```
+
