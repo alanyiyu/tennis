@@ -5,11 +5,7 @@ https://alanyiyu.shinyapps.io/shiny/ (Takes a while to load.)
 
 ## Purpose:
 
-We want to build a model to either (a) predict individual tennis matches or (b) predict next season's results OR (c) we want to compare and contrast the men's and women's professional tennis tours. 
-
-(a/b) There is a huge betting economy contignent on these match/season results. Not that we will participate, but in general, it's of interest to sports viewers who will win. There are several fantasy sports leagues that follow results closely. What factors go into predicting who will win? How does this compare with popular perception of who will win? What variables are "X-factors" that are impossible to model? Can we predict upsets/unexpected results? Is predicting a tennis match/season possible? **END PRODUCT: model predicting future results** 
-
-(c) There is often a perception that women's tennis is lower quality than men's tennis. Some people say that women are less capable and their style of play is less exciting. On another note, the women's tour is characterized as far more unpredictable than the men's tour. What does the data say about the similarities and differences between the tours, with regards to specific match statistics (like serve, return, unforced errors, winners), impact on social media/news world, and consistency of top players? **END PRODUCT: visualizations/statistical analysis**
+There is often a perception that women's tennis is lower quality than men's tennis. Some people say that women are less capable and their style of play is less exciting. On another note, the women's tour is characterized as far more unpredictable than the men's tour. What does the data say about the similarities and differences between the tours, with regards to specific match statistics (like serve, return, unforced errors, winners), impact on social media/news world, and consistency of top players?
 
 ## Data:
 https://tennisabstract.com has extensive data that we can scrape. https://github.com/JeffSackmann contains many CSV files on individual tennis match data AND overall season result data.
@@ -98,10 +94,3 @@ https://tennisabstract.com has extensive data that we can scrape. https://github
 loser_rank           | numeric   | Loser's most recent ATP or WTA rank as of the tournament date |
 | loser_rank_points  | numeric   | Loser's most recent number of ranking points as of the tournament date |
 | tourney_winner     | character | Final tournament winner
-
-
-
-## Project update (11/23/21):
-1. We have access to most of our data (90%), but are still in the process of exploring which variables are important and which are not. The other 10% may include more specific ranking or player data, depending on how we structure our final report (more on that in 2).
-2. Our biggest issue so far seems to be visualizing (to ourselves, not in R) what our final product might look like. We want to make a data visualization of differences between the men's and women's tour across certain metrics, and compare those differences to common perceptions, but it's not entirely clear which metrics we will end up caring about and how we might create a cohesive visualization that brings together these metrics in some way (as opposed to having separate visualizations for each of our metrics). Some ideas we had were looking up game commentary, news articles, and other forms of literature that reflect the perception that the women's tour is not as strong in comparison to the men's tour, and using what we find to get a better idea of what metrics might be of interest to us for the resulting visualization. Then, after deciding which metrics to focus on, we can begin performing statistical analysis and building our visualizations to see if the data backs up these perceptions.
-3. We are thinking about using Shiny to create a scrollytelling format for our report. 
