@@ -3,14 +3,14 @@
 ## Link to project
 https://alanyiyu.shinyapps.io/shiny/ (Takes a while to load.)
 
-## Purpose:
+## Purpose
 
 There is often a perception that women's tennis is lower quality than men's tennis. Some people say that women are less capable and their style of play is less exciting. On another note, the women's tour is characterized as far more unpredictable than the men's tour. What does the data say about the similarities and differences between the tours, with regards to specific match statistics (like serve, return, unforced errors, winners), impact on social media/news world, and consistency of top players?
 
-## Data:
+## Data
 https://tennisabstract.com has extensive data that we can scrape. https://github.com/JeffSackmann contains many CSV files on individual tennis match data AND overall season result data.
 
-## Variables/Glossary of Values:
+## Variables/Glossary of Values
 
 1. tourney_level
 * The level of the tournament.
