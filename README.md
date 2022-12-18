@@ -1,7 +1,7 @@
 # Is the WTA really more ‘inconsistent’ than the ATP?
 
 ## Link to project
-https://alanyiyu.shinyapps.io/shiny/ TEMPORARILY DOWN
+https://alanyiyu.shinyapps.io/shiny/ (Takes a while to load.)
 
 ## Purpose:
 
